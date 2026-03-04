@@ -188,6 +188,61 @@ pub fn install_to_config(
     Ok(name.to_string())
 }
 
+fn configure_codex_clients(exe_path: &Path) -> Result<String> {
+    let home_dir = env::var_os("HOME")
+        .or_else(|| env::var_os("USERPROFILE"))
+        .ok_or_else(|| eyre!("Could not find home directory for Codex config"))?;
+    let config_dir = Path::new(&home_dir).join(".codex");
+    fs::create_dir_all(&config_dir)?;
+    let config_path = config_dir.join("config.toml");
+
+    let config = if config_path.exists() {
+        fs::read_to_string(&config_path)?
+    } else {
+        String::new()
+    };
+
+    let mut cleaned = String::new();
+    let mut skipping = false;
+    for line in config.lines() {
+        let trimmed = line.trim_start();
+        if skipping && trimmed.starts_with('[') {
+            skipping = false;
+        }
+        if skipping {
+            continue;
+        }
+        if trimmed.starts_with("[mcp_servers.Roblox_Studio]") {
+            skipping = true;
+            continue;
+        }
+        cleaned.push_str(line);
+        cleaned.push('\n');
+    }
+
+    if !cleaned.ends_with('\n') && !cleaned.is_empty() {
+        cleaned.push('\n');
+    }
+
+    let new_block = format!(
+        "[mcp_servers.Roblox_Studio]\ncommand = \"{}\"\nargs = [\"--stdio\"]\n",
+        exe_path.display()
+    );
+    cleaned.push_str(&new_block);
+    if !cleaned.ends_with('\n') {
+        cleaned.push('\n');
+    }
+
+    fs::write(&config_path, cleaned)?;
+
+    println!(
+        "Installed MCP Studio plugin to Codex config {}",
+        config_path.display()
+    );
+
+    Ok("Codex".to_string())
+}
+
 async fn install_internal() -> Result<String> {
     let plugin_bytes = include_bytes!(concat!(env!("OUT_DIR"), "/MCPStudioPlugin.rbxm"));
     let studio = RobloxStudio::locate()?;
@@ -219,6 +274,7 @@ async fn install_internal() -> Result<String> {
         install_to_config(get_claude_config(), &this_exe, "Claude"),
         install_to_config(get_cursor_config(), &this_exe, "Cursor"),
         install_to_config(get_antigravity_config(), &this_exe, "Antigravity"),
+        configure_codex_clients(&this_exe),
         suggest_to_config_claude_code(&this_exe),
     ];
 
